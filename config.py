@@ -10,3 +10,13 @@ class Config:
     dropout: float = 0.1
     bias: bool = True
     n_layers: int = 12
+
+    # training parameters
+    grad_clip: float = 1.0
+    learning_rate_warmup_epochs: int = 500
+    learning_rate_decay_epochs: int = 4000
+    evaluation_epochs: int = 100
+    training_epochs: int = 5000
+    learning_rate: int = 3e-4
+    weight_decay:int  = 0.1
+    accumulation_steps:int = 100
