@@ -3,7 +3,6 @@ import torch
 from dataclasses import dataclass
 from torch import nn
 import torch.nn.functional as F
-from config import Config
 
 
 class Model(nn.Module):
@@ -33,7 +32,7 @@ class Model(nn.Module):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
 
 
-    def forward(self, x):
+    def forward(self, x, targets):
 
         batch_size, sequence_length = x.size()
 
@@ -48,9 +47,17 @@ class Model(nn.Module):
             x = block(x)
 
         x = self.transformer.ln_f(x)
-        x = self.lm_head(x)
 
-        return x
+        # training
+        if targets is not None:
+            logits = self.lm_head(x)
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+
+        else:
+            logits = self.lm_head(x[:, -1, :])
+            loss = None
+
+        return logits, loss
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):

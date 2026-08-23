@@ -3,6 +3,7 @@ from dataclasses import dataclass
 @dataclass
 class Config:
     n_embedding: int = 768
+    batch_size: int = 4
     vocab_size: int = 50304
     n_head: int = 12
     block_size: int = 1024
