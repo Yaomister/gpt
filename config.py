@@ -15,8 +15,9 @@ class Config:
     grad_clip: float = 1.0
     learning_rate_warmup_epochs: int = 500
     learning_rate_decay_epochs: int = 4000
-    evaluation_epochs: int = 100
+    evaluation_epochs: int = 1000
     training_epochs: int = 5000
-    learning_rate: int = 3e-4
+    learning_rate: float = 3e-4
+    minimum_learning_rate: float = 3e-5
     weight_decay:int  = 0.1
     accumulation_steps:int = 100

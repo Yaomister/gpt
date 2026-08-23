@@ -9,8 +9,8 @@ from dataclasses import asdict
 from data.tokenizer import Tokenizer
 
 raw_dataset_dir = "data/datasets/text.txt"
-bin_training_dataset_dir = "data/dataset/train.bin"
-bin_validation_dataset_dir = "data/dataset/validate.bin"
+bin_training_dataset_dir = "data/datasets/train.bin"
+bin_validation_dataset_dir = "data/datasets/validate.bin"
 merges_dir = "data/datasets/merges.json"
 
 
@@ -67,20 +67,21 @@ def configure_optimizer(model):
     optimizer = torch.optim.AdamW([
         {'params': to_decay,  "weight_decay" : Config.weight_decay},
         {"params" : to_not_decay, "weight_decay": 0}
-    ])
+    ], lr=Config.learning_rate, betas=(0.9, 0.95))
 
     return optimizer
 
 def get_learning_rate(epoch):
-    warmup_epochs, decay_epochs, learning_rate = Config.learning_rate_warmup_epochs, Config.learning_rate_decay_epochs, Config.learning_rate
+    warmup_epochs, decay_epochs, learning_rate, minimum_learning_rate = Config.learning_rate_warmup_epochs, Config.learning_rate_decay_epochs, Config.learning_rate, Config.minimum_learning_rate
     if epoch < warmup_epochs:
         return learning_rate * ((epoch + 1 ) / (warmup_epochs + 1))
     elif epoch > decay_epochs:
-        return learning_rate
+        return minimum_learning_rate
     else:
         # cosine decay
         decay_ratio = (epoch - warmup_epochs ) / (decay_epochs - warmup_epochs)
-        return 0.5 * (1 + math.cos(math.pi * decay_ratio))
+        coefficient = 0.5 * (1 + math.cos(math.pi * decay_ratio))
+        return minimum_learning_rate + coefficient * (learning_rate - minimum_learning_rate)
 
 if __name__ == "__main__":
     print('start training')
@@ -96,10 +97,18 @@ if __name__ == "__main__":
 
     optimizer = configure_optimizer(model)
 
+    if os.path.isfile("checkpoint.pt"):
+        checkpoint = torch.load("checkpoint.pt")
+        model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        starting_epoch = checkpoint['epoch'] + 1
+        best_loss = checkpoint['min_loss']
+    else:
+        best_loss = float("inf")
+        starting_epoch = 0
 
-    best_loss = float("inf")
 
-    for epoch in range(Config.training_epochs):
+    for epoch in range(starting_epoch, Config.training_epochs):
         current_learning_rate = get_learning_rate(epoch)
 
         for g in optimizer.param_groups:
@@ -128,9 +137,12 @@ if __name__ == "__main__":
                 'optimizer': optimizer.state_dict(),
                 'config': asdict(Config()),   
                 'epoch': epoch,
-                'min_loss': min,
-            }, 'ckpt.pt')
+                'min_loss': best_loss,
+            }, 'checkpoint.pt')
 
+        best_loss = loss.item()
 
-        if (epoch + 1) % 1000 == 0:
-            print(f"epoch {epoch + 1} | loss {loss.item()}")
+        if (epoch + 1) % Config.evaluation_epochs == 0:
+            losses = evaluate_loss(model)
+            print(f"epoch {epoch} | train {losses['training']:.4f} | val {losses['validation']:.4f}")
+        
