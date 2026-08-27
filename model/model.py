@@ -27,7 +27,7 @@ class Model(nn.Module):
 
         self.apply(self._init_weights)
 
-        for pn, p in self.named_parameters:
+        for pn, p in self.named_parameters():
             if pn.endswith("c_proj"):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
 
@@ -96,7 +96,7 @@ class CausalAttention(nn.Module):
 
         self.n_embedding = config.n_embedding
         self.dropout = config.dropout
-        self.n_heads = config.n_heads
+        self.n_heads = config.n_head
 
     def forward(self, x):
         batch_size, sequence_length, _ = x.size()
@@ -118,12 +118,12 @@ class CausalAttention(nn.Module):
         mask = torch.triu(torch.ones(sequence_length, sequence_length, dtype=torch.bool, device=attention.device), diagonal=1)
         attention = attention.masked_fill(mask, float("-inf"))
         attention = attention / math.sqrt(d_k)
-        attention = nn.Softmax(attention, dim=-1)
+        attention = F.softmax(attention, dim=-1)
         attention = self.attention_dropout(attention)
         # (sequence_length, d_k)
         y = attention @  v
 
-        y.transpose(d_k, sequence_length).view(batch_size, sequence_length, self.n_embedding)
+        y = y.transpose(1, 2).reshape(batch_size, sequence_length, self.n_embedding)
 
         y = self.residual_dropout(self.c_proj(y))
 

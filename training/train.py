@@ -11,8 +11,9 @@ from data.tokenizer import Tokenizer
 raw_dataset_dir = "data/datasets/text.txt"
 bin_training_dataset_dir = "data/datasets/train.bin"
 bin_validation_dataset_dir = "data/datasets/validate.bin"
-merges_dir = "data/datasets/merges.json"
+merges_dir = "data/merges.json"
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def tokenize_dataset(dir, tokenizer):
     with open(dir, "r") as f:
@@ -54,8 +55,8 @@ def get_batch(dir):
 
     starting_index = torch.randint(0, len(dataset) - block_size, (batch_size, ))
 
-    x = torch.stack([torch.from_numpy(dataset[i: i + block_size].astype(np.int64)) for i in starting_index]).to("cuda")
-    y = torch.stack([torch.from_numpy(dataset[i + 1:i + block_size + 1].astype(np.int64)) for i in starting_index]).to("cuda")
+    x = torch.stack([torch.from_numpy(dataset[i: i + block_size].astype(np.int64)) for i in starting_index]).to(device)
+    y = torch.stack([torch.from_numpy(dataset[i + 1:i + block_size + 1].astype(np.int64)) for i in starting_index]).to(device)
 
     return x, y
 
@@ -90,10 +91,9 @@ if __name__ == "__main__":
     tokenizer.load(merges_dir)
 
     if not os.path.isfile(bin_training_dataset_dir):
-        tokenize_dataset(tokenizer)
+        tokenize_dataset(merges_dir, tokenizer)
 
-
-    model = Model(Config()).to("cuda")
+    model = Model(Config()).to(device)
 
     optimizer = configure_optimizer(model)
 
@@ -109,6 +109,7 @@ if __name__ == "__main__":
 
 
     for epoch in range(starting_epoch, Config.training_epochs):
+        print(f"epoch {epoch}")
         current_learning_rate = get_learning_rate(epoch)
 
         for g in optimizer.param_groups:
