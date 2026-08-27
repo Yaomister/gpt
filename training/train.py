@@ -114,8 +114,6 @@ if __name__ == "__main__":
         for g in optimizer.param_groups:
             g['lr'] = current_learning_rate
 
-
-
         # gradient accumulation so the GPUs dont explode
         optimizer.zero_grad(set_to_none=True)
         for micro_step in range(Config.accumulation_steps):
