@@ -11,6 +11,9 @@ class Config:
     bias: bool = True
     n_layers: int = 12
 
+    # inference parameters
+    use_cache: bool = True
+
     # training parameters
     grad_clip: float = 1.0
     learning_rate_warmup_epochs: int = 500

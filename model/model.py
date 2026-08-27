@@ -10,7 +10,11 @@ class Model(nn.Module):
         super().__init__()
         assert config.vocab_size is not None
         assert config.block_size is not None
-        self.config = config
+        self.n_embedding = config.n_embedding
+        self.block_size = config.block_size
+        self.use_cache = config.use_cache
+        self.current_position = 0
+
 
         self.transformer = nn.ModuleDict(
             dict(
@@ -31,12 +35,39 @@ class Model(nn.Module):
             if pn.endswith("c_proj"):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
 
+    def _reset_cache(self):
+        for block in self.transformer.h:
+            block._reset_cache()
+        self.current_position = 0
 
-    def forward(self, x, targets):
+    @torch.no_grad()
+    def generate(self, indexes, maximum_new_tokens):
+        self._reset_cache()
+
+        if self.use_cache:
+            logits = self.forward(indexes[:, -self.block_size: ])
+            for _ in range(maximum_new_tokens):
+                next_index = logits[:, -1].argmax(dim = -1, keepdim=True)
+                indexes = torch.cat([indexes, next_index], dim=1)
+                logits, _ = self.forward(next_index)
+        else:
+            for _ in range(maximum_new_tokens):
+                logits, _ = self.forward(indexes)
+                next_index = logits[:, -1].argmax(dim = -1, keepdim=True)
+                indexes = torch.concat([indexes, next_index], dim= 1)
+
+        return indexes
+        
+        
+    def forward(self, x, targets=None):
 
         batch_size, sequence_length = x.size()
 
-        p = torch.arange(0, sequence_length, dtype=torch.long, device=x.device)
+        if self.config.use_cache:
+            p = torch.arange(self.current_position, self.current_position + sequence_length, dtype=torch.long, device=x.device)
+            self.current_position += sequence_length
+        else:
+            p = torch.arange(0, sequence_length, dtype=torch.long, device=x.device)
 
         token_embeddings = self.transformer.wte(x)
         position_embeddings = self.transformer.wpe(p)
@@ -52,7 +83,6 @@ class Model(nn.Module):
         if targets is not None:
             logits = self.lm_head(x)
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-
         else:
             logits = self.lm_head(x[:, -1, :])
             loss = None
@@ -67,9 +97,6 @@ class Model(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0, std=0.02)
 
-    def generate(self):
-        pass
-
 
 class LayerNormalization(nn.Module):
     def __init__(self, config):
@@ -82,7 +109,7 @@ class LayerNormalization(nn.Module):
         var = x.var(-1, keepdim=True) 
         return (x - mean)/ torch.sqrt(var+ 1e-5) * self.weight + self.bias
 
-class CausalAttention(nn.Module):
+class MultiHeadAttention(nn.Module):
     def __init__(self, config):
         super().__init__()
         assert config.n_embedding % config.n_head == 0
@@ -98,19 +125,38 @@ class CausalAttention(nn.Module):
         self.dropout = config.dropout
         self.n_heads = config.n_head
 
+        self.use_cache = config.use_cache
+
+        self.register_buffer("cache_k", None)
+        self.register_buffer("cache_v", None)
+
+    def _reset_cache(self):
+        self.cache_k = None
+        self.cache_v = None
+
+
     def forward(self, x):
         batch_size, sequence_length, _ = x.size()
 
         q, k, v = self.c_attention(x).split(self.n_embedding, dim=-1)
 
+        if self.use_cache:
+            if self.cache_k is None and self.cache_v is None:
+                self.cache_k = k
+                self.cache_v = v
+            else:
+                self.cache_k = torch.concat([self.cache_k, k], dim=1)
+                self.cache_v = torch.concat([self.cache_v, v], dim =1)
 
+            k = self.cache_k
+            v = self.cache_v
+            
         d_k = self.n_embedding // self.n_heads
 
         # sawpping dimension 1 and 2 so the score calculated is per head, and you end with a tensor that is (sequence_length, d_k)
         q = q.view(batch_size, sequence_length, self.n_heads, d_k).transpose(1, 2)
-        v = v.view(batch_size, sequence_length, self.n_heads, d_k).transpose(1, 2)
-        k = k.view(batch_size, sequence_length, self.n_heads, d_k).transpose(1, 2)
-
+        v = v.view(batch_size, v.size(1), self.n_heads, d_k).transpose(1, 2)
+        k = k.view(batch_size, k.size(1), self.n_heads, d_k).transpose(1, 2)
 
         # (sequence_length, sequence_length)
         attention = q @ k.transpose(-2, -1)
@@ -120,7 +166,7 @@ class CausalAttention(nn.Module):
         attention = attention / math.sqrt(d_k)
         attention = F.softmax(attention, dim=-1)
         attention = self.attention_dropout(attention)
-        # (sequence_length, d_k)
+        # (batch_size, n_head, sequence_length, d_k)
         y = attention @  v
 
         y = y.transpose(1, 2).reshape(batch_size, sequence_length, self.n_embedding)
@@ -128,11 +174,12 @@ class CausalAttention(nn.Module):
         y = self.residual_dropout(self.c_proj(y))
 
         return y
+
  
 class Block(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.attention = CausalAttention(config)
+        self.attention = MultiHeadAttention(config)
         self.mlp = MLP(config)
         self.ln_1 = LayerNormalization(config)
         self.ln_2 = LayerNormalization(config)
