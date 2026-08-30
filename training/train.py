@@ -5,11 +5,12 @@ import argparse
 import numpy as np
 from model import Model
 from config import Config
-from torch.optim import AdamW
-from torch.nn.parallel import DistributedDataParallel as DDP
 from utils.setup import ddp
 from dataclasses import asdict
+from torch.optim import AdamW
 from data.tokenizer import Tokenizer
+from data.dataloader import DataLoader
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 raw_dataset_dir = "data/datasets/text.txt"
 bin_training_dataset_dir = "data/datasets/train.bin"
@@ -31,7 +32,7 @@ model = Model(Config()).to(device)
 model = DDP(model, device_ids=[ddp_local_rank])
 raw_model = model.module
 
-def tokenize_dataset(dir, tokensizer):
+def tokenize_dataset(dir):
     with open(dir, "r") as f:
         raw_text = f.read()
 
@@ -45,7 +46,7 @@ def tokenize_dataset(dir, tokensizer):
     np.array(ids[split:], dtype=np.uint16).tofile(bin_validation_dataset_dir)
 
 @torch.no_grad()
-def evaluate_loss(model):
+def evaluate_loss(model, evaluation_loader):
     out = {}
     model.eval()
     for dataset, dataset_dir in {
@@ -54,7 +55,7 @@ def evaluate_loss(model):
     }.items():
         losses = torch.zeros(Config.evaluation_epochs)
         for i in  range(Config.evaluation_epochs):
-            x, y = get_batch(dataset_dir)
+            x, y = evaluation_loader.next_batch()
             logits, loss = model(x, y)
             losses[i] = loss.item()
         out[dataset] = losses.mean()
@@ -62,19 +63,6 @@ def evaluate_loss(model):
     model.train()
     return out
 
-
-def get_batch(dir):
-
-    dataset = np.fromfile(dir, dtype=np.uint16)
-    batch_size = Config.batch_size
-    block_size = Config.block_size
-
-    starting_index = torch.randint(0, len(dataset) - block_size, (batch_size, ))
-
-    x = torch.stack([torch.from_numpy(dataset[i: i + block_size].astype(np.int64)) for i in starting_index]).to(device)
-    y = torch.stack([torch.from_numpy(dataset[i + 1:i + block_size + 1].astype(np.int64)) for i in starting_index]).to(device)
-
-    return x, y
 
 def configure_optimizer(model):
     # we only want to add weight decay to the weights not the biases
@@ -107,7 +95,16 @@ if __name__ == "__main__":
     tokenizer.load(merges_dir)
 
     if not os.path.isfile(bin_training_dataset_dir):
-        tokenize_dataset(merges_dir, tokenizer)
+        tokenize_dataset(raw_dataset_dir)
+
+    train_data = np.fromfile(bin_training_dataset_dir, dtype=np.uint16)
+    val_data = np.fromfile(bin_validation_dataset_dir, dtype=np.uint16)
+
+    train_loader = DataLoader(train_data, Config.batch_size, Config.block_size,
+                              ddp_rank, ddp_world_size)
+    evaluation_loader = DataLoader(val_data, Config.batch_size, Config.block_size,
+                            ddp_rank, ddp_world_size)
+
 
 
     optimizer = configure_optimizer(model)
@@ -133,7 +130,8 @@ if __name__ == "__main__":
         # gradient accumulation so the GPUs dont explode
         optimizer.zero_grad(set_to_none=True)
         for micro_step in range(Config.accumulation_steps):
-            x, y = get_batch(bin_training_dataset_dir)
+            x, y = train_loader.next_batch()
+            x.to(device), y.to(device)
             with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
                 logits, loss = model(x, y)
                 loss = loss / Config.accumulation_steps
@@ -159,6 +157,6 @@ if __name__ == "__main__":
         best_loss = loss.item()
 
         if (epoch + 1) % Config.evaluation_epochs == 0:
-            losses = evaluate_loss(model)
+            losses = evaluate_loss(model, evaluation_loader)
             print(f"epoch {epoch} | train {losses['training']:.4f} | val {losses['validation']:.4f}")
         
