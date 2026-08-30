@@ -37,7 +37,7 @@ class Model(nn.Module):
 
     def _reset_cache(self):
         for block in self.transformer.h:
-            block._reset_cache()
+            block.attention._reset_cache()
         self.current_position = 0
 
     @torch.no_grad()
@@ -63,7 +63,7 @@ class Model(nn.Module):
 
         batch_size, sequence_length = x.size()
 
-        if self.config.use_cache:
+        if self.use_cache:
             p = torch.arange(self.current_position, self.current_position + sequence_length, dtype=torch.long, device=x.device)
             self.current_position += sequence_length
         else:
