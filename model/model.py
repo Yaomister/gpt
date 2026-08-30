@@ -13,6 +13,7 @@ class Model(nn.Module):
         self.n_embedding = config.n_embedding
         self.block_size = config.block_size
         self.use_cache = config.use_cache
+        self.eot_token_id = config.vocab_size
         self.current_position = 0
 
 
@@ -47,13 +48,15 @@ class Model(nn.Module):
         if self.use_cache:
             logits = self.forward(indexes[:, -self.block_size: ])
             for _ in range(maximum_new_tokens):
-                next_index = logits[:, -1].argmax(dim = -1, keepdim=True)
+                next_index = logits.argmax(dim = -1, keepdim=True)
                 indexes = torch.cat([indexes, next_index], dim=1)
+                if next_index.item() == self.eot_token_id:
+                    break
                 logits, _ = self.forward(next_index)
         else:
             for _ in range(maximum_new_tokens):
                 logits, _ = self.forward(indexes)
-                next_index = logits[:, -1].argmax(dim = -1, keepdim=True)
+                next_index = logits.argmax(dim = -1, keepdim=True)
                 indexes = torch.concat([indexes, next_index], dim= 1)
 
         return indexes

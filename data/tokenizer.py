@@ -7,7 +7,11 @@ from collections import Counter
 class Tokenizer:
     def __init__(self):
         self.vocabulary = None
+        self.merges = None
         self.regex = re.compile(r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]++[\r\n]*|\s*[\r\n]|\s+(?!\S)|\s+""")
+        self.special_tokens = {
+            "<|endoftext|>": Config.vocab_size - 1
+        }
 
     def train(self, text, save_path):
         print('training tokenizer')
@@ -17,7 +21,7 @@ class Tokenizer:
 
         merges = {}
 
-        for new_id in range(256, Config.vocab_size):  
+        for new_id in range(256, Config.vocab_size - 1):  
             counts = Counter()      
             for chunk in chunks:
                 for pair in zip(chunk, chunk[1:]):
@@ -51,11 +55,9 @@ class Tokenizer:
                 i += 2
             else:
                 new_chunk.append(chunk[i])
-                i += 1
-    
+                i += 1 
         return new_chunk
-            
-
+        
 
     def load(self, load_path):
         # already saved in order
@@ -73,7 +75,17 @@ class Tokenizer:
 
     def encode(self, text):
         assert self.merges is not None
-        
+        pattern = "(" + "|".join(re.escape(s) for s in self.special_tokens) + ")"
+        ids = []
+        for part in re.split(pattern, text):
+            if part in self.special_tokens:
+                ids.append(self.special_tokens[part])
+            else:
+                ids.extend(self._encode(part))
+
+        return ids
+
+    def _encode(self, text):
         ids =  []
         for chunk in self.regex.findall(text):
             chunk_ids = list(chunk.encode("utf-8"))
