@@ -1,6 +1,7 @@
 import os
 import math
 import torch
+import argparse
 import numpy as np
 from model import Model
 from config import Config
@@ -13,7 +14,15 @@ bin_training_dataset_dir = "data/datasets/train.bin"
 bin_validation_dataset_dir = "data/datasets/validate.bin"
 merges_dir = "data/merges.json"
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--resume_from_checkpoint", type=bool, default=False, required=False)
+# can only use fp8 precision on H100 GPUs or later
+parser.add_argument("--use-fp8", type=bool, default=False, required=False)
+
+args = parser.parse_args()
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
 
 def tokenize_dataset(dir, tokenizer):
     with open(dir, "r") as f:
@@ -68,7 +77,7 @@ def configure_optimizer(model):
     optimizer = torch.optim.AdamW([
         {'params': to_decay,  "weight_decay" : Config.weight_decay},
         {"params" : to_not_decay, "weight_decay": 0}
-    ], lr=Config.learning_rate, betas=(0.9, 0.95))
+    ], lr=Config.learning_rate, betas=(0.9, 0.95), fused=True)
 
     return optimizer
 
@@ -96,10 +105,10 @@ if __name__ == "__main__":
     model = Model(Config()).to(device)
 
     optimizer = configure_optimizer(model)
-
-    if os.path.isfile("checkpoint.pt"):
+    
+    if args.resume_from_checkpoint and  os.path.isfile("checkpoint.pt"):
         checkpoint = torch.load("checkpoint.pt")
-        model.load_state_dict(checkpoint['model'])
+        model.load_state_dict(checkpoint['model'], strict=True, assign=True)
         optimizer.load_state_dict(checkpoint['optimizer'])
         starting_epoch = checkpoint['epoch'] + 1
         best_loss = checkpoint['min_loss']
@@ -130,6 +139,8 @@ if __name__ == "__main__":
 
         optimizer.step()
 
+
+        # gradient checkpointing
         if loss.item() < best_loss:
             torch.save({
                 'model': model.state_dict(),
