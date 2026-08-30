@@ -6,6 +6,8 @@ import numpy as np
 from model import Model
 from config import Config
 from torch.optim import AdamW
+from torch.nn.parallel import DistributedDataParallel as DDP
+from utils.setup import ddp
 from dataclasses import asdict
 from data.tokenizer import Tokenizer
 
@@ -21,10 +23,15 @@ parser.add_argument("--use-fp8", type=bool, default=False, required=False)
 
 args = parser.parse_args()
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
 
+can_use_ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = ddp() 
+master_process = ddp_rank == 0
 
-def tokenize_dataset(dir, tokenizer):
+model = Model(Config()).to(device)
+model = DDP(model, device_ids=[ddp_local_rank])
+raw_model = model.module
+
+def tokenize_dataset(dir, tokensizer):
     with open(dir, "r") as f:
         raw_text = f.read()
 
@@ -102,10 +109,9 @@ if __name__ == "__main__":
     if not os.path.isfile(bin_training_dataset_dir):
         tokenize_dataset(merges_dir, tokenizer)
 
-    model = Model(Config()).to(device)
 
     optimizer = configure_optimizer(model)
-    
+
     if args.resume_from_checkpoint and  os.path.isfile("checkpoint.pt"):
         checkpoint = torch.load("checkpoint.pt")
         model.load_state_dict(checkpoint['model'], strict=True, assign=True)
