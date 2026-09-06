@@ -128,7 +128,7 @@ if __name__ == "__main__":
         best_loss = float("inf")
         starting_epoch = 0
 
-
+    total_training_time = 0
     for epoch in range(starting_epoch, Config.training_epochs):
         print0(f"epoch {epoch}")
         current_learning_rate = get_learning_rate(epoch)
@@ -162,10 +162,14 @@ if __name__ == "__main__":
         if loss.item() < best_loss and master_process:
             torch.save({
                 'model': raw_model.state_dict(),
+                "epoch": epoch,
+                "data_loader": train_loader.state_dict(),
+                "rng": torch.get_rng_state(),
+                "cuda_rng": torch.cuda.get_rng_state(),
                 'optimizer': optimizer.state_dict(),
                 'config': asdict(Config()),   
-                'epoch': epoch,
-                'min_loss': best_loss,
+                'best_loss': best_loss,
+                'total_training_time': total_training_time
             }, 'checkpoint.pt')
 
         best_loss = loss.item()
@@ -174,6 +178,7 @@ if __name__ == "__main__":
         torch.cuda.synchronize()
 
         dt = t0 - t1
+        total_training_time += dt
 
         tokens_per_step = Config.batch_size * Config.block_size * Config.accumulation_steps * ddp_world_size
         tokens_per_second = tokens_per_step // dt
