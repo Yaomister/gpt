@@ -1,5 +1,6 @@
 import os
 import math
+import time
 import torch
 import argparse
 import contextlib
@@ -12,6 +13,7 @@ from dataclasses import asdict
 from utils.printing import print0
 from data.tokenizer import Tokenizer
 from data.dataloader import DataLoader
+from utils.common import get_peak_flops, get_device_type
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 raw_dataset_dir = "data/datasets/text.txt"
@@ -34,6 +36,12 @@ model = Model(Config()).to(device)
 model = DDP(model, device_ids=[ddp_local_rank])
 model = torch.compile(model=model, dynamic=True)
 raw_model = model.module
+
+
+
+device_type = get_device_type()
+flops_per_token = raw_model.estimate_flops()
+peak_flops = get_peak_flops(device_type)
 
 def tokenize_dataset(dir):
     with open(dir, "r") as f:
@@ -128,6 +136,9 @@ if __name__ == "__main__":
         for g in optimizer.param_groups:
             g['lr'] = current_learning_rate
 
+        torch.cuda.synchronize()
+        t0 = time.time()
+
         # gradient accumulation so the GPUs dont explode
         optimizer.zero_grad(set_to_none=True)
         for micro_step in range(Config.accumulation_steps):
@@ -147,7 +158,6 @@ if __name__ == "__main__":
 
         optimizer.step()
 
-
         # gradient checkpointing
         if loss.item() < best_loss and master_process:
             torch.save({
@@ -159,6 +169,17 @@ if __name__ == "__main__":
             }, 'checkpoint.pt')
 
         best_loss = loss.item()
+
+        t1 = time.time()
+        torch.cuda.synchronize()
+
+        dt = t0 - t1
+
+        tokens_per_step = Config.batch_size * Config.block_size * Config.accumulation_steps * ddp_world_size
+        tokens_per_second = tokens_per_step // dt
+        mfu = 100 * (flops_per_token * tokens_per_step / dt) / (peak_flops * ddp_world_size)
+
+        print0(f"epoch {epoch:05d} | loss {loss:.4f} | dt {dt*1000:.1f}ms | token/s {tokens_per_second:,.0f} | mfu {mfu:.1f}%")
 
         if (epoch + 1) % Config.evaluation_epochs == 0:
             losses = evaluate_loss(model, evaluation_loader)

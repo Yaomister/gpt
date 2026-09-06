@@ -1,3 +1,5 @@
-def print0(content, is_master_process):
-    if is_master_process:
+import os
+
+def print0(content="", **kwargs):
+    if os.environ.get("RANK",0) == 0:
         print(content)

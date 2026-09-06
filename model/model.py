@@ -12,6 +12,7 @@ class Model(nn.Module):
         assert config.block_size is not None
         self.n_embedding = config.n_embedding
         self.block_size = config.block_size
+        self.n_head = config.n_head
         self.use_cache = config.use_cache
         self.eot_token_id = config.vocab_size
         self.current_position = 0
@@ -60,6 +61,11 @@ class Model(nn.Module):
                 indexes = torch.concat([indexes, next_index], dim= 1)
 
         return indexes
+
+    def estimate_flops(self):
+        # 2 for forward pass and 4 for backward pass per parameter, and 12 * number of layers * embedding size * block size
+        parameters = sum(p.numel() for p in self.parameters())
+        return 6 * parameters + 12 * self.n_embedding * self.block_size * self.n_head
         
         
     def forward(self, x, targets=None):
