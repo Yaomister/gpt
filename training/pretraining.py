@@ -2,6 +2,7 @@ import os
 import math
 import torch
 import argparse
+import contextlib
 import numpy as np
 from model import Model
 from config import Config
@@ -131,11 +132,14 @@ if __name__ == "__main__":
         optimizer.zero_grad(set_to_none=True)
         for micro_step in range(Config.accumulation_steps):
             x, y = train_loader.next_batch()
-            x.to(device), y.to(device)
-            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-                logits, loss = model(x, y)
-                loss = loss / Config.accumulation_steps
-            loss.backward()
+            x, y = x.to(device), y.to(device)
+            is_last = micro_step == Config.accumulation_steps - 1
+            ctx = contextlib.nullcontext() if is_last else model.no_sync()
+            with ctx:
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    logits, loss = model(x, y)
+                    loss = loss / Config.accumulation_steps
+                loss.backward()
 
         if Config.grad_clip != 0:
             # gradient clipping, so one bad run doesnt throw off all the weights
@@ -145,7 +149,7 @@ if __name__ == "__main__":
 
 
         # gradient checkpointing
-        if loss.item() < best_loss:
+        if loss.item() < best_loss and master_process:
             torch.save({
                 'model': raw_model.state_dict(),
                 'optimizer': optimizer.state_dict(),

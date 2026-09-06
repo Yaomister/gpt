@@ -25,4 +25,3 @@ class Config:
     minimum_learning_rate: float = 3e-5
     weight_decay:int  = 0.1
     accumulation_steps:int = 100
-    fp8: bool = True
