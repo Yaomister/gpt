@@ -1,8 +1,8 @@
 import math
 import torch
-from dataclasses import dataclass
 from torch import nn
 import torch.nn.functional as F
+from dataclasses import dataclass
 
 
 class Model(nn.Module):
@@ -127,6 +127,7 @@ class MultiHeadAttention(nn.Module):
         self.n_embedding = config.n_embedding
         self.dropout = config.dropout
         self.n_heads = config.n_head
+        self.use_flash_attention = config.use_flash_attention
 
         self.use_cache = config.use_cache
 
@@ -153,7 +154,10 @@ class MultiHeadAttention(nn.Module):
 
             k = self.cache_k
             v = self.cache_v
-            
+
+        # (sequence_length, sequence_length)
+        mask = torch.triu(torch.ones(sequence_length, sequence_length, dtype=torch.bool, device=attention.device), diagonal=1)
+
         d_k = self.n_embedding // self.n_heads
 
         # sawpping dimension 1 and 2 so the score calculated is per head, and you end with a tensor that is (sequence_length, d_k)
@@ -161,16 +165,19 @@ class MultiHeadAttention(nn.Module):
         v = v.view(batch_size, v.size(1), self.n_heads, d_k).transpose(1, 2)
         k = k.view(batch_size, k.size(1), self.n_heads, d_k).transpose(1, 2)
 
-        # (sequence_length, sequence_length)
-        attention = q @ k.transpose(-2, -1)
-        # (sequence_length, sequence_length)
-        mask = torch.triu(torch.ones(sequence_length, sequence_length, dtype=torch.bool, device=attention.device), diagonal=1)
-        attention = attention.masked_fill(mask, float("-inf"))
-        attention = attention / math.sqrt(d_k)
-        attention = F.softmax(attention, dim=-1)
-        attention = self.attention_dropout(attention)
-        # (batch_size, n_head, sequence_length, d_k)
-        y = attention @  v
+        if self.use_flash_attention:
+            # PyTorch uses FlashAttention2
+            y = F.scaled_dot_product_attention(q, k, v, mask, self.dropout, is_causal=True)
+        else:
+            # (sequence_length, sequence_length)
+            attention = q @ k.transpose(-2, -1)
+        
+            attention = attention.masked_fill(mask, float("-inf"))
+            attention = attention / math.sqrt(d_k)
+            attention = F.softmax(attention, dim=-1)
+            attention = self.attention_dropout(attention)
+            # (batch_size, n_head, sequence_length, d_k)
+            y = attention @  v
 
         y = y.transpose(1, 2).reshape(batch_size, sequence_length, self.n_embedding)
 

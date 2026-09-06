@@ -17,7 +17,6 @@ class DataLoader:
             self.current = self.start
             buffer = self.tokens[self.current : self.current + length]
 
-
         x = buffer[:-1].view(self.batch_size, self.sequence_length)
         y = buffer[1: ].view(self.batch_size, self.sequence_length)
 

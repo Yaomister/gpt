@@ -10,6 +10,7 @@ class Config:
     dropout: float = 0.1
     bias: bool = True
     n_layers: int = 12
+    use_flash_attention: bool = False
 
     # inference parameters
     use_cache: bool = True
