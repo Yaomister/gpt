@@ -30,6 +30,7 @@ master_process = ddp_rank == 0
 
 model = Model(Config()).to(device)
 model = DDP(model, device_ids=[ddp_local_rank])
+model = torch.compile(model=model, dynamic=True)
 raw_model = model.module
 
 def tokenize_dataset(dir):
@@ -104,8 +105,6 @@ if __name__ == "__main__":
                               ddp_rank, ddp_world_size)
     evaluation_loader = DataLoader(val_data, Config.batch_size, Config.block_size,
                             ddp_rank, ddp_world_size)
-
-
 
     optimizer = configure_optimizer(model)
 
