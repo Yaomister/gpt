@@ -11,8 +11,6 @@ cd $SLURM_SUBMIT_DIR
 
 mkdir -p logs
 
-
 source /home/yao.eric/llm/.venv/bin/activate
-
 
 python -u training/train.py

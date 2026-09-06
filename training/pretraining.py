@@ -6,8 +6,9 @@ import numpy as np
 from model import Model
 from config import Config
 from utils.setup import ddp
-from dataclasses import asdict
 from torch.optim import AdamW
+from dataclasses import asdict
+from utils.printing import print0
 from data.tokenizer import Tokenizer
 from data.dataloader import DataLoader
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -39,7 +40,7 @@ def tokenize_dataset(dir):
 
     ids = tokenizer.encode(raw_text)
 
-    print(f"{len(raw_text)} characters to {len(ids)} tokens")
+    print0(f"{len(raw_text)} characters to {len(ids)} tokens")
 
     split = int(len(ids) * 0.8)
 
@@ -90,7 +91,7 @@ def get_learning_rate(epoch):
         return minimum_learning_rate + coefficient * (learning_rate - minimum_learning_rate)
 
 if __name__ == "__main__":
-    print('start training')
+    print0('start training')
 
     tokenizer = Tokenizer()
     tokenizer.load(merges_dir)
@@ -120,7 +121,7 @@ if __name__ == "__main__":
 
 
     for epoch in range(starting_epoch, Config.training_epochs):
-        print(f"epoch {epoch}")
+        print0(f"epoch {epoch}")
         current_learning_rate = get_learning_rate(epoch)
 
         for g in optimizer.param_groups:
@@ -146,7 +147,7 @@ if __name__ == "__main__":
         # gradient checkpointing
         if loss.item() < best_loss:
             torch.save({
-                'model': model.state_dict(),
+                'model': raw_model.state_dict(),
                 'optimizer': optimizer.state_dict(),
                 'config': asdict(Config()),   
                 'epoch': epoch,
@@ -157,5 +158,5 @@ if __name__ == "__main__":
 
         if (epoch + 1) % Config.evaluation_epochs == 0:
             losses = evaluate_loss(model, evaluation_loader)
-            print(f"epoch {epoch} | train {losses['training']:.4f} | val {losses['validation']:.4f}")
+            print0(f"epoch {epoch} | train {losses['training']:.4f} | val {losses['validation']:.4f}")
         

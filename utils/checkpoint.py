@@ -21,7 +21,7 @@ def save_checkpoint(dir, step, model_data, optimizer_data, meta_data, ddp_rank):
     if optimizer_data is not None:
         os.makedirs(dir, exist_ok=True)
         optimizer_path = os.path.join(dir, f"optimizer_{step:06d}_{ddp_rank:d}.pt")
-        torch.save(optimizer_data, optimizer_data)
+        torch.save(optimizer_path, optimizer_data)
         logger.info(f"Saved optimizer parameters ta to f{meta_data_path}.")
 
 
